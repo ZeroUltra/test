@@ -1,274 +1,381 @@
 <!DOCTYPE html>
-<html>
+<html lang="zh-CN">
 <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content='width=device-width, height=device-height, initial-scale=1.0, minimum-scale=1.0, user-scalable=no, shrink-to-fit=yes'>
-    <title>Unity WebGL Player | WebAR</title>
-    <link rel="stylesheet" href="TemplateData/style.css">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>华丽圣诞 - 互动树</title>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/lucide-static@0.321.0/font/lucide.min.css"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        html{
-            height: -webkit-fill-available;
-        }
-        body {
-            margin: 0;
-            padding: 0;
-            min-height: 100vh;
-            min-height: -webkit-fill-available;
-            width: 100vw;
+        body { margin: 0; overflow: hidden; background: #050a05; font-family: 'Inter', sans-serif; color: #f3e5ab; }
+        canvas { display: block; }
+        #video-container {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            width: 120px;
+            height: 90px;
+            border: 2px solid #d4af37;
+            border-radius: 12px;
             overflow: hidden;
+            z-index: 100;
+            transform: scaleX(-1);
+            background: #000;
         }
-        .ctaDiv {
+        #ui-overlay {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            z-index: 50;
+            pointer-events: none;
+        }
+        .status-pill {
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(212, 175, 55, 0.3);
+            padding: 8px 16px;
+            border-radius: 99px;
+            font-size: 14px;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .glow-text {
+            text-shadow: 0 0 10px #d4af37, 0 0 20px #d4af37;
+        }
+        #upload-btn {
+            position: fixed;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: linear-gradient(135deg, #d4af37, #8b0000);
+            color: white;
+            padding: 12px 24px;
+            border-radius: 30px;
+            font-weight: bold;
+            pointer-events: auto;
+            cursor: pointer;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+            z-index: 200;
+        }
+        #loading-screen {
+            position: fixed;
+            inset: 0;
+            background: #050a05;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            position: absolute;
-            left: 0;
-            right: 0;
-            top: 0;
-            bottom: 0;
-            background: #fffa;
-            z-index: 99;
+            z-index: 1000;
+        }
+        #error-msg {
+            color: #ff4444;
+            display: none;
+            text-align: center;
+            padding: 20px;
+            max-width: 80%;
         }
     </style>
 </head>
 <body>
-    <!--IMAGETARGETS-->
-		<imagetarget id='bear' src='targets/bear.png'></imagetarget>
-		<imagetarget id='bfly' src='targets/bfly.png'></imagetarget>
-		<imagetarget id='flower' src='targets/flower.png'></imagetarget>
-		<imagetarget id='lady' src='targets/lady.png'></imagetarget>
-		<imagetarget id='reel' src='targets/reel.png'></imagetarget>
-		<imagetarget id='rmn' src='targets/rmn.png'></imagetarget>
-		<imagetarget id='图层 1' src='targets/a.png'></imagetarget>
-		<imagetarget id='a' src='targets/a.png'></imagetarget>
 
-    <video id="webcam-video" muted autoplay playsinline style="width:1px;position:absolute"></video>
-    <!-- <video id="webcam-video" muted autoplay playsinline style="width:100%; height:100%; object-fit:cover; position:absolute"></video> -->
-    <canvas id="video-canvas" style="width:100%; height:100%; object-fit:cover; position:absolute"></canvas>
-    <div id="startARDiv" class="ctaDiv">
-        <select id="chooseCamSel" style="display: none;" onchange="SelectCam()"></select>
-        <p style="text-align: center; width:60vw;">This augmented reality experience requires access to your device's camera</p>
-        <button id="startARButton" onclick="StartAR()" style="display:none">ALLOW ACCESS</button>
+<div id="loading-screen">
+    <div id="loader" class="w-16 h-16 border-4 border-t-[#d4af37] border-transparent rounded-full animate-spin mb-4"></div>
+    <p id="loading-text" class="text-[#d4af37] font-serif italic">正在召唤魔法...</p>
+    <div id="error-msg">
+        <p class="font-bold mb-2 text-xl" id="error-title">相机无法连接</p>
+        <p class="text-sm opacity-80" id="error-desc">
+            您的浏览器不支持相机接口，或者您正在使用非加密链接（HTTP）。
+            请尝试通过 HTTPS 访问或使用 Chrome/Safari 浏览器。
+        </p>
+        <button onclick="location.reload()" class="mt-4 px-4 py-2 bg-[#d4af37] text-black rounded-full text-sm font-bold">重试</button>
     </div>
-    <div id="screenshotDiv" style="display: none;" class="ctaDiv">
-        <div style="position:relative; background-color:white; padding:10px; box-shadow: 0 4px 8px 0 rgba(0, 0, 0, 0.3), 0 6px 20px 0 rgba(0, 0, 0, 0.25);">
-            <img id="screenshotImg" src="" alt="screenshot" style="width:80vw; height:80vh">
-            <button onclick="document.getElementById('screenshotDiv').style.display = 'none';" style="position:absolute; transform:translateY(-100%); right:0; top:0">Close</button>
-        </div>
+</div>
+
+<div id="ui-overlay">
+    <div class="status-pill">
+        <div id="gesture-dot" class="w-3 h-3 rounded-full bg-red-500"></div>
+        <span id="gesture-name" class="font-bold">相机准备中...</span>
     </div>
-    <div id="confirmUrlDiv" style="display: none;" class="ctaDiv">
-        <div style="position:relative; background-color:white; padding:10px; box-shadow: 0 4px 8px 0 rgba(0, 0, 0, 0.3), 0 6px 20px 0 rgba(0, 0, 0, 0.25); width: 80vw; display:flex; flex-direction: column; align-items: center;">
-            <p id="confirmUrlText" style="text-align: center; width:80%; overflow: hidden; text-overflow: ellipsis;">Are you sure you want to visit url.com?</p>
-            <div>
-                <button onclick="window.open(newUrlString, '_blank').focus(); document.getElementById('confirmUrlDiv').style.display = 'none'">VISIT SITE</button>
-                <button onclick="document.getElementById('confirmUrlDiv').style.display = 'none'">GO BACK</button>
-            </div>
-        </div>
-    </div>
-    <div id="errorDiv" class="ctaDiv" style="display: none; background:#aaa">
-        <p id="errorText" style="text-align: center; width:60vw; color:white"></p>
-    </div>
-    <div id="unity-container" class="unity-mobile">
-        <canvas id="unity-canvas" style="width: 100%; height: 100%; background: #0000; z-index: -99"></canvas>
-        <div id="unity-loading-bar">
-            <div id="unity-logo"></div>
-            <div id="unity-progress-bar-empty">
-                <div id="unity-progress-bar-full"></div>
-            </div>
-        </div>
-        <canvas id="video-canvas"></canvas>
-    </div>
-    <script src="arcamera.js" type="text/javascript"></script>
-    <script src="itracker.js" type="text/javascript"></script>
-    <script src="Build/build.loader.js"></script>
-    <script>
-            var initialize = async() =>{
-                var unityCanvas = document.querySelector("#unity-canvas");
-                var videoCanvas = document.querySelector("#video-canvas");
-                window.arCamera = new ARCamera(unityCanvas, videoCanvas);
-                window.iTracker = new ImageTracker(arCamera);
-                try{
-                    await window.iTracker.initialize();
-                    console.log("ImageTracker initialized!");
-                }
-                catch{
-                    console.error("Failed to initialize ImageTracker. Are you missing opencv.js? " + error);
-                    ShowError("Failed to initialize the experience.");
-                    return;
-                }
-                
-                await LoadWebcams();
-                document.getElementById("startARButton").style.display = "block";
-            }
-            initialize();
-            var container = document.querySelector("#unity-container");
-            var canvas = document.querySelector("#unity-canvas");
-            var loadingBar = document.querySelector("#unity-loading-bar");
-            var progressBarFull = document.querySelector("#unity-progress-bar-full");
-            function StartAR() {
-                canvas.style.width = window.innerWidth + "px";
-                canvas.style.height = window.innerHeight + "px";
-                
-                document.getElementById("startARDiv").style.display = "none";
-                createUnityInstance(document.querySelector("#unity-canvas"), {
-                    dataUrl: "Build/build.data",
-                    frameworkUrl: "Build/build.framework.js",
-                    codeUrl: "Build/build.wasm",
-                    streamingAssetsUrl: "StreamingAssets",
-                    companyName: "DefaultCompany",
-                    productName: "WebAR",
-                    productVersion: "1.0",
-                    //webglContextAttributes: { "preserveDrawingBuffer": true },
-                    // matchWebGLToCanvasSize: false, // Uncomment this to separately control WebGL canvas render size and DOM element size.
-                    // devicePixelRatio: 1, // Uncomment this to override low DPI rendering on high DPI displays.
-                    },
-                    (progress) => {
-                        progressBarFull.style.width = 100 * progress + "%";
-                    }
-                ).then((unityInstance) => {
-                    window.unityInstance = unityInstance;
-                    RequestWebcam();
-                    loadingBar.style.display = "none";
-                });
-                loadingBar.style.display = "block";
-            }
-            //Set Facing Mode here ('environment', 'user', '')
-		window.unityFacingMode = "environment"
-            window.WEBCAM_SETTINGS = {
-                video: {
-                    facingMode: unityFacingMode,
-                },
-                audio: false
-            };
-            window.requestingForPermissions = false;
-            async function RequestWebcam(){
-                window.requestingForPermissions = true;
-                try{
-                    window.webcamStream = await navigator.mediaDevices.getUserMedia(window.WEBCAM_SETTINGS);
-                    console.log("Webcam access granted");
-                    requestingForPermissions = false;
-                }
-                catch (err) {
-                    //user denied camera permission - show error panel
-                    console.error("getUserMedia error - " , err);
-                    ShowError("Failed to start the experience. Camera permission was denied");
-                    window.requestingForPermissions = false;
-                }           
-            }
-            async function StartWebcam(){
-                console.log("StartWebcam")
-                while (window.requestingForPermissions) {
-                    // Wait until requestingForPermissions becomes true.
-                    console.log("Waiting for permissions...");
-                    await new Promise(resolve => setTimeout(resolve, 100)); // Adjust the delay time as needed.
-                }
-                console.log("Got Permissions");
-                if(window.webcamStream)
-                {
-                    const video = document.querySelector("#webcam-video");
-                    video.srcObject = webcamStream;
-                    try {
-                        await arCamera.startWebcam(video);
-                        console.log("Webcam started successfully");
-                        window.unityInstance.SendMessage('ARCamera', 'OnStartWebcamSuccess');
-                    }
-                    catch(err){
-                        console.error("Webcam failed to start - ", err);
-                        window.unityInstance.SendMessage('ARCamera', 'OnStartWebcamFail');
-                    }   
-                }
-                else{
-                    console.error("Webcam failed to start - permission not yet granted");
-                    window.unityInstance.SendMessage('ARCamera', 'OnStartWebcamFail');
-                }  
-            }
-            async function LoadWebcams(){
-                let camDevices = [];
-                // let backCams = [];
-                let devices = await navigator.mediaDevices.enumerateDevices();
-                var ctr = 0;
-                devices.forEach(mediaDevice => {
-                    if (mediaDevice.kind === 'videoinput') {
-                        if(window.unityFacingMode == 'environment' && !mediaDevice.label.includes('facing front')){
-                            //back cam only
-                            camDevices.push(mediaDevice);
-                        }
-                        else if(window.unityFacingMode == 'user' && mediaDevice.label.includes('facing front')){
-                            //front cam only
-                            camDevices.push(mediaDevice);
-                        }
-                        else{
-                            //back and front
-                            camDevices.push(mediaDevice);
-                        }   
-                        
-                        ctr++;
-                    }
-                });
-                var select = document.getElementById("chooseCamSel");
-                select.style.display = "block";
-                var count = 0;
-                //reverse array because some Android phones can't distinguish front and back cams at first load
-                //and when this happens, most of the time, front cam goes first and back cam goes last
-                camDevices = camDevices.reverse();
-                camDevices.forEach(mediaDevice => {
-                    const option = document.createElement('option');
-                    option.value = mediaDevice.deviceId;
-                    let label = `Camera ${count}`;
-                    if (mediaDevice.label) {
-                        label = mediaDevice.label
-                    }
-                    const textNode = document.createTextNode(label);
-                    option.appendChild(textNode);
-                    select.appendChild(option);
-                    count++;
-                });
-                iTracker.WEBCAM_NAME = select.options[select.selectedIndex].innerHTML;
-            }
-            function SelectCam(){
-                var select = document.getElementById("chooseCamSel");
-                window.deviceId = select.value;
-                window.WEBCAM_SETTINGS.video['deviceId'] = deviceId;
-                //console.log(window.WEBCAM_SETTINGS);
-                iTracker.WEBCAM_NAME = select.options[select.selectedIndex].innerHTML;
-            }
-            async function FlipCam(){
-                arCamera.stopWebcam();
-                window.WEBCAM_SETTINGS.video.deviceId = '';
-                if(window.WEBCAM_SETTINGS.video.facingMode == 'user'){
-                    window.WEBCAM_SETTINGS.video.facingMode = 'environment';
-                    arCamera.setFlipped(false);
-                }
-                else{
-                    window.WEBCAM_SETTINGS.video.facingMode = 'user';
-                    arCamera.setFlipped(true);
-                }
-                window.webcamStream = await navigator.mediaDevices.getUserMedia(window.WEBCAM_SETTINGS);
-                const video = document.querySelector("#webcam-video");
-                video.srcObject = webcamStream;
-                await arCamera.startWebcam(video);
-            }
-            function ShowError(error){
-                document.getElementById("errorDiv").style.display = "flex";
-                document.getElementById("errorText").innerHTML = error;
-            }
-            function ShowScreenshot(dataUrl){
-                document.getElementById("screenshotDiv").style.display = "flex";
-                document.getElementById("screenshotImg").src = dataUrl;
-                document.getElementById("screenshotImg").style.width = "80vw";
-                document.getElementById("screenshotImg").style.height = 80 / window.innerWidth * window.innerHeight + "vw";
-            }
-            function ShowConfirmUrl(url){
-                document.getElementById("confirmUrlDiv").style.display = "flex";
-                window.newUrlString = url;
-                document.getElementById("confirmUrlText").innerText = "Are you sure you want to visit " + url;                
-            }
-            window.ITRACKER_GLOBALS = {
-                //place global settings here
-                INTERNAL_SMOOTHFACTOR_POS: .075,
-            }
+    <h1 class="text-3xl font-serif mt-4 glow-text italic">The Golden Pine</h1>
+    <p class="text-xs opacity-60 mt-2">握拳:合拢 | 张开:散开 | 抓取:放大照片</p>
+</div>
+
+<div id="video-container">
+    <video id="input-video" class="w-full h-full object-cover" playsinline muted autoplay></video>
+</div>
+
+<label id="upload-btn">
+    上传照片
+    <input type="file" id="image-input" class="hidden" multiple accept="image/*">
+</label>
+
+<script>
+    // --- Configuration & State ---
+    const COLORS = {
+        matteGreen: 0x1a2e1a,
+        metallicGold: 0xd4af37,
+        crimsonRed: 0x8b0000,
+        glow: 0xfff9e3
+    };
+
+    let state = 'FOLDED';
+    let scene, camera, renderer, clock;
+    let elements = [];
+    let photos = [];
+    let targetRotation = { x: 0, y: 0 };
+    let currentRotation = { x: 0, y: 0 };
+    let zoomPhoto = null;
+
+    // --- Three.js Initialization ---
+    function initThree() {
+        scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x050a05, 0.05);
+
+        camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.z = 8;
+
+        renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.toneMapping = THREE.ReinhardToneMapping;
+        renderer.toneMappingExposure = 1.2;
+        document.body.appendChild(renderer.domElement);
+
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+        scene.add(ambientLight);
+
+        const spotLight = new THREE.SpotLight(0xfff9e3, 1.5);
+        spotLight.position.set(5, 10, 5);
+        spotLight.castShadow = true;
+        scene.add(spotLight);
+
+        createTree();
+        clock = new THREE.Clock();
+        animate();
+    }
+
+    function createTree() {
+        const count = 100; // 降低数量提高移动端性能
+        const sphereGeo = new THREE.SphereGeometry(0.15, 12, 12);
+        const boxGeo = new THREE.BoxGeometry(0.2, 0.2, 0.2);
+        
+        const goldMat = new THREE.MeshStandardMaterial({ 
+            color: COLORS.metallicGold, 
+            metalness: 0.9, 
+            roughness: 0.1,
+            emissive: COLORS.metallicGold,
+            emissiveIntensity: 0.2
+        });
+        
+        const redMat = new THREE.MeshStandardMaterial({ 
+            color: COLORS.crimsonRed, 
+            roughness: 0.3 
+        });
+
+        for (let i = 0; i < count; i++) {
+            let mesh;
+            const type = Math.random();
+            if (type < 0.4) mesh = new THREE.Mesh(sphereGeo, i % 2 === 0 ? goldMat : redMat);
+            else if (type < 0.7) mesh = new THREE.Mesh(boxGeo, goldMat);
+            else mesh = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.4), redMat);
+
+            const height = Math.random() * 6 - 3;
+            const radius = (3 - (height + 3) / 2) * 0.8;
+            const angle = Math.random() * Math.PI * 2;
             
-    </script>
+            mesh.userData = {
+                foldedPos: new THREE.Vector3(Math.cos(angle) * radius, height, Math.sin(angle) * radius),
+                scatteredPos: new THREE.Vector3((Math.random() - 0.5) * 12, (Math.random() - 0.5) * 12, (Math.random() - 0.5) * 12),
+                rotationSpeed: new THREE.Vector3(Math.random()*0.02, Math.random()*0.02, Math.random()*0.02)
+            };
+            
+            mesh.position.copy(mesh.userData.foldedPos);
+            scene.add(mesh);
+            elements.push(mesh);
+        }
+    }
+
+    document.getElementById('image-input').addEventListener('change', (e) => {
+        const files = e.target.files;
+        for (const file of files) {
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                const texture = new THREE.TextureLoader().load(event.target.result);
+                const mat = new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide });
+                const geo = new THREE.PlaneGeometry(1, 1);
+                const mesh = new THREE.Mesh(geo, mat);
+                
+                const height = Math.random() * 6 - 3;
+                const radius = (3 - (height + 3) / 2) * 0.9;
+                const angle = Math.random() * Math.PI * 2;
+
+                mesh.userData = {
+                    isPhoto: true,
+                    foldedPos: new THREE.Vector3(Math.cos(angle)*radius, height, Math.sin(angle)*radius),
+                    scatteredPos: new THREE.Vector3((Math.random()-0.5)*10, (Math.random()-0.5)*10, (Math.random()-0.5)*10),
+                    rotationSpeed: new THREE.Vector3(0, 0.01, 0)
+                };
+                mesh.position.copy(mesh.userData.foldedPos);
+                scene.add(mesh);
+                elements.push(mesh);
+                photos.push(mesh);
+            };
+            reader.readAsDataURL(file);
+        }
+    });
+
+    // --- Camera & Gesture Core ---
+    const videoElement = document.getElementById('input-video');
+    const gestureName = document.getElementById('gesture-name');
+    const gestureDot = document.getElementById('gesture-dot');
+
+    const hands = new Hands({
+        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+    });
+
+    hands.setOptions({
+        maxNumHands: 1,
+        modelComplexity: 1,
+        minDetectionConfidence: 0.6,
+        minTrackingConfidence: 0.6
+    });
+
+    hands.onResults(results => {
+        const loadingScreen = document.getElementById('loading-screen');
+        if (loadingScreen && loadingScreen.style.display !== 'none') {
+            loadingScreen.style.display = 'none';
+        }
+
+        if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+            const landmarks = results.multiHandLandmarks[0];
+            const gesture = analyzeGesture(landmarks);
+            handleGesture(gesture, landmarks);
+            gestureDot.style.backgroundColor = '#22c55e';
+        } else {
+            gestureName.innerText = "正在寻找双手...";
+            gestureDot.style.backgroundColor = '#eab308';
+        }
+    });
+
+    function analyzeGesture(landmarks) {
+        const thumbTip = landmarks[4];
+        const indexTip = landmarks[8];
+        const middleTip = landmarks[12];
+        const ringTip = landmarks[16];
+        const pinkyTip = landmarks[20];
+        const wrist = landmarks[0];
+
+        const dist = (p1, p2) => Math.sqrt((p1.x-p2.x)**2 + (p1.y-p2.y)**2);
+        
+        const indexExt = dist(indexTip, wrist);
+        const middleExt = dist(middleTip, wrist);
+        const pinkyExt = dist(pinkyTip, wrist);
+        const pinchDist = dist(thumbTip, indexTip);
+
+        if (pinchDist < 0.06) return 'GRAB';
+        if (indexExt < 0.25 && middleExt < 0.25 && pinkyExt < 0.25) return 'FIST';
+        if (indexExt > 0.4 && middleExt > 0.4) return 'OPEN';
+        
+        return 'MOVE';
+    }
+
+    function handleGesture(gesture, landmarks) {
+        const nameMap = { 'FIST': '握拳 (合拢)', 'OPEN': '张开 (散开)', 'GRAB': '抓取 (放大照片)', 'MOVE': '移动 (旋转视角)' };
+        gestureName.innerText = nameMap[gesture] || gesture;
+        
+        if (gesture === 'FIST') {
+            state = 'FOLDED';
+            zoomPhoto = null;
+        } else if (gesture === 'OPEN') {
+            state = 'SCATTERED';
+            zoomPhoto = null;
+        } else if (gesture === 'GRAB') {
+            if (state !== 'ZOOMED' && photos.length > 0) {
+                state = 'ZOOMED';
+                zoomPhoto = photos[Math.floor(Math.random() * photos.length)];
+            }
+        } else if (gesture === 'MOVE') {
+            targetRotation.y = (landmarks[0].x - 0.5) * 2;
+            targetRotation.x = (landmarks[0].y - 0.5) * 1.5;
+        }
+    }
+
+    async function startCamera() {
+        // 显式检查权限接口
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            showCameraError("环境安全错误", "您的浏览器环境无法调用相机。请确保：\n1. 使用 HTTPS 访问（或 localhost）\n2. 不要使用微信内置浏览器或低版本手机浏览器。");
+            return;
+        }
+
+        try {
+            const cameraUtils = new Camera(videoElement, {
+                onFrame: async () => {
+                    await hands.send({ image: videoElement });
+                },
+                width: 640,
+                height: 480
+            });
+            await cameraUtils.start();
+        } catch (err) {
+            console.error("Camera start error:", err);
+            showCameraError("权限被拒绝", "无法访问相机，请在浏览器设置中允许该页面使用相机权限。");
+        }
+    }
+
+    function showCameraError(title, desc) {
+        document.getElementById('loader').style.display = 'none';
+        document.getElementById('loading-text').style.display = 'none';
+        document.getElementById('error-msg').style.display = 'block';
+        document.getElementById('error-title').innerText = title;
+        document.getElementById('error-desc').innerText = desc;
+    }
+
+    function animate() {
+        requestAnimationFrame(animate);
+        const delta = clock.getDelta();
+
+        currentRotation.x += (targetRotation.x - currentRotation.x) * 0.1;
+        currentRotation.y += (targetRotation.y - currentRotation.y) * 0.1;
+        scene.rotation.x = currentRotation.x;
+        scene.rotation.y = currentRotation.y;
+
+        elements.forEach(el => {
+            let targetPos;
+            if (state === 'FOLDED') {
+                targetPos = el.userData.foldedPos;
+            } else if (state === 'SCATTERED') {
+                targetPos = el.userData.scatteredPos;
+                el.rotation.x += el.userData.rotationSpeed.x;
+                el.rotation.y += el.userData.rotationSpeed.y;
+            } else if (state === 'ZOOMED') {
+                if (el === zoomPhoto) {
+                    targetPos = new THREE.Vector3(0, 0, 5);
+                    el.rotation.y += 0.02;
+                } else {
+                    targetPos = el.userData.scatteredPos;
+                }
+            }
+            el.position.lerp(targetPos, 0.05);
+        });
+
+        renderer.render(scene, camera);
+    }
+
+    window.onload = () => {
+        initThree();
+        startCamera();
+    };
+
+    window.onresize = () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    };
+</script>
 </body>
 </html>
